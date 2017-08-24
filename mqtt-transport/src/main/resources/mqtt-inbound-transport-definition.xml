@@ -1,5 +1,6 @@
 <transport name="MQTT"
 	label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_LBL}"
+	contact="yourname@yourcompany.com" version="10.4.1"
 	domain="com.esri.geoevent.transport.mqtt.inbound" type="inbound">
 	<description>${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_DESC}
 	</description>
