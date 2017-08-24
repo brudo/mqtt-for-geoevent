@@ -52,7 +52,7 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 
 	private static final BundleLogger	log			= BundleLoggerFactory.getLogger(MqttInboundTransport.class);
 
-	private Thread										thread	= null;
+	private volatile Thread								thread	= null;
 	private int												port;
 	private String										host;
 	private boolean										ssl;
@@ -67,6 +67,7 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 		super(definition);
 	}
 
+	@Override
 	@SuppressWarnings("incomplete-switch")
 	public void start() throws RunningException
 	{
@@ -98,17 +99,17 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 
 	private void receiveData()
 	{
+		if (this.thread == null) return; // already stopped before even scheduled
 		try
 		{
 			applyProperties();
 			setRunningState(RunningState.STARTED);
 
 			String url = (ssl ? "ssl://" : "tcp://") + host + ":" + Integer.toString(port);
-			mqttClient = new MqttClient(url, MqttClient.generateClientId(), new MemoryPersistence());
+			MqttClient client = new MqttClient(url, MqttClient.generateClientId(), new MemoryPersistence());
 
-			mqttClient.setCallback(new MqttCallback()
+			client.setCallback(new MqttCallback()
 				{
-
 					@Override
 					public void messageArrived(String topic, MqttMessage message) throws Exception
 					{
@@ -118,7 +119,8 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 						}
 						catch (RuntimeException e)
 						{
-							e.printStackTrace();
+							log.error("RuntimeException in messageArrived for MQTT inbound transport", e);
+							//e.printStackTrace();
 						}
 					}
 
@@ -153,9 +155,27 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			}
 
 			options.setCleanSession(true);
-			mqttClient.connect(options);
-			mqttClient.subscribe(topic, qos);
 
+			boolean connecting = false;
+
+			synchronized (this)
+			{
+			  if (this.thread == Thread.currentThread())
+			  {
+				mqttClient = client; // remember initialized client
+				connecting = true;
+			  }
+			}
+			
+			if (connecting)
+			{
+				client.connect(options);
+				client.subscribe(topic, qos);
+			}
+			else
+			{
+				client.close();
+			}
 		}
 		catch (Throwable ex)
 		{
@@ -268,10 +288,12 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 		}
 	}
 
+	@Override
 	public synchronized void stop()
 	{
 		try
 		{
+			this.thread = null; // primitive cancellation signal
 			if (this.mqttClient != null)
 			{
 				this.mqttClient.disconnect();
