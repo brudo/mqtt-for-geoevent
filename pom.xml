@@ -4,7 +4,7 @@
 
 	<groupId>com.esri.geoevent.parent</groupId>
 	<artifactId>mqtt</artifactId>
-	<version>10.5.0</version>
+	<version>10.4.1</version>
 	<packaging>pom</packaging>
 
 	<name>Esri :: GeoEvent :: MQTT</name>
