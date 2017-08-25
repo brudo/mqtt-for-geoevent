@@ -32,7 +32,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
-import org.eclipse.paho.client.mqttv3.MqttCallback;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -113,13 +113,36 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			setRunningState(RunningState.STARTED);
 
 			String url = (ssl ? "ssl://" : "tcp://") + host + ":" + Integer.toString(port);
-			MqttClient client = new MqttClient(url, MqttClient.generateClientId(), new MemoryPersistence());
-
-			client.setCallback(new MqttCallback()
+			final MqttClient client = new MqttClient(url, MqttClient.generateClientId(), new MemoryPersistence());
+			client.setCallback(new MqttCallbackExtended()
 				{
+					@Override
+					public void connectComplete(boolean reconnect, String serverURI)
+					{
+						log.info((reconnect ? "Reconnected to " : "Connected to ") + serverURI);
+						
+						try
+						{
+							client.subscribe(topic, qos);
+						}
+						catch (MqttException e)
+						{
+							log.error("Error in subscribe after connecting to MQTT broker.", e);
+							if (client == mqttClient && getRunningState() == RunningState.STARTED)
+							{
+								setRunningState(RunningState.ERROR);
+							}
+						}
+					}
+					
 					@Override
 					public void messageArrived(String topic, MqttMessage message) throws Exception
 					{
+						if (client != mqttClient || getRunningState() != RunningState.STARTED)
+						{
+							return;
+						}
+						
 						try
 						{
 							receive(message.getPayload());
@@ -140,7 +163,7 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 					@Override
 					public void connectionLost(Throwable cause)
 					{
-						log.error("CONNECTION_LOST", cause.getLocalizedMessage());
+						log.warn("CONNECTION_LOST", cause.getLocalizedMessage());
 					}
 				});
 
@@ -166,29 +189,25 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 				sslProperties.setProperty("com.ibm.ssl.protocol", "TLS");
 				options.setSSLProperties(sslProperties);
 			}
-			
-			if (autoReconnect)
-			{
-				options.setAutomaticReconnect(autoReconnect);
-			}
 
 			options.setCleanSession(true);
+			options.setAutomaticReconnect(autoReconnect);
 
 			boolean connecting = false;
 
 			synchronized (this)
 			{
-			  if (this.thread == Thread.currentThread())
-			  {
-				mqttClient = client; // remember initialized client
-				connecting = true;
-			  }
+				if (thread == Thread.currentThread())
+				{
+					mqttClient = client; // remember initialized client
+					connecting = true;
+				}
 			}
 			
 			if (connecting)
 			{
 				client.connect(options);
-				client.subscribe(topic, qos);
+				// subscribe moved to connectComplete callback
 			}
 			else
 			{
