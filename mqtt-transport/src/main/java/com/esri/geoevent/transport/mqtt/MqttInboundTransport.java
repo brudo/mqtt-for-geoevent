@@ -42,10 +42,13 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import com.esri.ges.core.component.ComponentException;
 import com.esri.ges.core.component.RunningException;
 import com.esri.ges.core.component.RunningState;
+import com.esri.ges.core.property.Property;
 import com.esri.ges.framework.i18n.BundleLogger;
 import com.esri.ges.framework.i18n.BundleLoggerFactory;
 import com.esri.ges.transport.InboundTransportBase;
 import com.esri.ges.transport.TransportDefinition;
+import java.util.HashSet;
+import java.util.Set;
 
 public class MqttInboundTransport extends InboundTransportBase implements Runnable
 {
@@ -56,8 +59,12 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 	private int												port;
 	private String										host;
 	private boolean										ssl;
+	private int											altPort;
+	private String										altHost;
+	private boolean										altSsl;
 	private String										topic;
 	private int												qos;
+	private boolean										autoReconnect;
 	private MqttClient								mqttClient;
 	private String										username;
 	private char[]										password;
@@ -145,13 +152,24 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 				options.setUserName(username);
 				options.setPassword(password);
 			}
+			
+			if (altHost != null)
+			{
+				String altUrl = (altSsl ? "ssl://" : "tcp://") + altHost + ":" + Integer.toString(altPort);
+				options.setServerURIs(new String[] { url, altUrl });
+			}
 
-			if (ssl)
+			if (ssl || (altHost != null && altSsl))
 			{
 				// Support TLS only (1.0-1.2) as even SSL 3.0 has well known exploits
 				java.util.Properties sslProperties = new java.util.Properties();
 				sslProperties.setProperty("com.ibm.ssl.protocol", "TLS");
 				options.setSSLProperties(sslProperties);
+			}
+			
+			if (autoReconnect)
+			{
+				options.setAutomaticReconnect(autoReconnect);
 			}
 
 			options.setCleanSession(true);
@@ -217,6 +235,9 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 
 	private void applyProperties() throws Exception
 	{
+		
+		Pattern mqttUrlPattern = Pattern.compile("^(?:(tcp|ssl)://)?([-.a-z0-9]+)(?::([0-9]+))?$", Pattern.CASE_INSENSITIVE);
+		
 		ssl = false;
 		port = 1883;
 		host = "iot.eclipse.org"; // default
@@ -225,7 +246,7 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			String value = (String) getProperty("host").getValue();
 			if (!value.trim().equals(""))
 			{
-				Matcher matcher = Pattern.compile("^(?:(tcp|ssl)://)?([-.a-z0-9]+)(?::([0-9]+))?$", Pattern.CASE_INSENSITIVE).matcher(value);
+				Matcher matcher = mqttUrlPattern.matcher(value);
 				if (matcher.matches())
 				{
 					ssl = "ssl".equalsIgnoreCase(matcher.group(1));
@@ -240,6 +261,30 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			}
 		}
 
+		altSsl = false;
+		altPort = 1883;
+		altHost = null; // none by default
+		Property altHostProp = getProperty("alternateHost");
+		if (altHostProp != null && altHostProp.isValid())
+		{
+			String value = (String) altHostProp.getValue();
+			if (value != null && !value.trim().equals(""))
+			{
+				Matcher matcher = mqttUrlPattern.matcher(value);
+				if (matcher.matches())
+				{
+					altSsl = "ssl".equalsIgnoreCase(matcher.group(1));
+					altHost = matcher.group(2);
+					altPort = matcher.start(3) > -1 ? Integer.parseInt(matcher.group(3)) :
+									altSsl ? 8883 : 1883; 
+				}
+				else
+				{
+					throw new MalformedURLException("Invalid MQTT Alternate Host URL");
+				}
+			}
+		}
+		
 		topic = "topic/sensor"; // default
 		if (getProperty("topic").isValid())
 		{
@@ -285,6 +330,11 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			{
 				throw e; // shouldn't ever happen
 			}
+		}
+		
+		autoReconnect = false;
+		if (getProperty("autoReconnect").isValid()) {
+			autoReconnect = Boolean.TRUE.equals(getProperty("autoReconnect").getValue());
 		}
 	}
 
