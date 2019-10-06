@@ -10,6 +10,11 @@
 			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_HOST_DESC}"
 			propertyType="String" defaultValue="tcp://iot.eclipse.org:1883" mandatory="true"
 			readOnly="false" />
+		<propertyDefinition propertyName="alternateHost"
+			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_ALTHOST_LBL}"
+			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_ALTHOST_DESC}"
+			propertyType="String" defaultValue="" mandatory="false"
+			readOnly="false" />
 		<propertyDefinition propertyName="qos"
 			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_QOS_LBL}"
 			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_QOS_DESC}"
@@ -36,15 +41,30 @@
 			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_PASSWORD_DESC}"
 			propertyType="Password" defaultValue="" mandatory="false"
 			readOnly="false" />
-		<propertyDefinition propertyName="alternateHost"
-			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_ALTHOST_LBL}"
-			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_ALTHOST_DESC}"
+		<propertyDefinition propertyName="predefClientId"
+			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_DEFCLIENTID_LBL}"
+			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_DEFCLIENTID_DESC}"
 			propertyType="String" defaultValue="" mandatory="false"
 			readOnly="false" />
 		<propertyDefinition propertyName="autoReconnect"
 			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_AUTORECON_LBL}"
 			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_AUTORECON_DESC}"
-			propertyType="Boolean" defaultValue="false" mandatory="false"
+			propertyType="Boolean" defaultValue="true" mandatory="false"
 			readOnly="false" />
+		<propertyDefinition propertyName="cleanSession"
+			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_CLEANSESS_LBL}"
+			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_CLEANSESS_DESC}"
+			propertyType="Boolean" defaultValue="true" mandatory="false"
+			readOnly="false" />
+		<propertyDefinition propertyName="unsubOnStop"
+			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_UNSUBONSTOP_LBL}"
+			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_UNSUBONSTOP_DESC}"
+			propertyType="Boolean" defaultValue="false" mandatory="false"
+			readOnly="false" dependsOn="cleanSession=false" />
+		<propertyDefinition propertyName="resubOnRecon"
+			label="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_RESUBONRECON_LBL}"
+			description="${com.esri.geoevent.transport.mqtt-transport.TRANSPORT_IN_RESUBONRECON_DESC}"
+			propertyType="Boolean" defaultValue="true" mandatory="false"
+			readOnly="false" dependsOn="cleanSession=false" />
 	</propertyDefinitions>
 </transport>

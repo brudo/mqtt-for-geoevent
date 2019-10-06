@@ -47,8 +47,6 @@ import com.esri.ges.framework.i18n.BundleLogger;
 import com.esri.ges.framework.i18n.BundleLoggerFactory;
 import com.esri.ges.transport.InboundTransportBase;
 import com.esri.ges.transport.TransportDefinition;
-import java.util.HashSet;
-import java.util.Set;
 
 public class MqttInboundTransport extends InboundTransportBase implements Runnable
 {
@@ -65,9 +63,14 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 	private String										topic;
 	private int												qos;
 	private boolean										autoReconnect;
+	private boolean										cleanSession;
+	private boolean										resubOnRecon;
+	private boolean										unsubOnStop;
+	private String									predefClientId;
 	private MqttClient								mqttClient;
 	private String										username;
 	private char[]										password;
+	private String										generatedClientId;
 
 	public MqttInboundTransport(TransportDefinition definition) throws ComponentException
 	{
@@ -113,24 +116,39 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			setRunningState(RunningState.STARTED);
 
 			String url = (ssl ? "ssl://" : "tcp://") + host + ":" + Integer.toString(port);
-			final MqttClient client = new MqttClient(url, MqttClient.generateClientId(), new MemoryPersistence());
+			String sessionClientId = predefClientId != null ? predefClientId : 
+				generatedClientId != null ? generatedClientId :
+					(generatedClientId = MqttClient.generateClientId());
+			
+			final MqttClient client = new MqttClient(url, sessionClientId, new MemoryPersistence());
 			client.setCallback(new MqttCallbackExtended()
 				{
 					@Override
 					public void connectComplete(boolean reconnect, String serverURI)
 					{
 						log.info((reconnect ? "Reconnected to " : "Connected to ") + serverURI);
-						
-						try
+
+						if (client == mqttClient && getRunningState() == RunningState.STARTED)
 						{
-							client.subscribe(topic, qos);
-						}
-						catch (MqttException e)
-						{
-							log.error("Error in subscribe after connecting to MQTT broker.", e);
-							if (client == mqttClient && getRunningState() == RunningState.STARTED)
+							try
 							{
-								setRunningState(RunningState.ERROR);
+								// this may be redundant if clean session is not selected, and
+								// may cause any retained messages to be resent unnecessarily,
+								// but this is a small price to pay for renewing the subscription.
+                // todo test other options, but for now recommend cleanSession,
+                // or when using preset session id, try without resubOnRecon
+								if (!reconnect || cleanSession || resubOnRecon)
+                {
+									client.subscribe(topic, qos);
+                }
+							}
+							catch (MqttException e)
+							{
+								log.error("Error in subscribe after connecting to MQTT broker.", e);
+								if (client == mqttClient && getRunningState() == RunningState.STARTED)
+								{
+									setRunningState(RunningState.ERROR);
+								}
 							}
 						}
 					}
@@ -138,19 +156,17 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 					@Override
 					public void messageArrived(String topic, MqttMessage message) throws Exception
 					{
-						if (client != mqttClient || getRunningState() != RunningState.STARTED)
+						if (client == mqttClient)
 						{
-							return;
-						}
-						
-						try
-						{
-							receive(message.getPayload());
-						}
-						catch (RuntimeException e)
-						{
-							log.error("RuntimeException in messageArrived for MQTT inbound transport", e);
-							//e.printStackTrace();
+							try
+							{
+								receive(message.getPayload());
+							}
+							catch (RuntimeException e)
+							{
+								log.error("RuntimeException in messageArrived for MQTT inbound transport", e);
+								//e.printStackTrace();
+							}
 						}
 					}
 
@@ -163,7 +179,19 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 					@Override
 					public void connectionLost(Throwable cause)
 					{
-						log.warn("CONNECTION_LOST", cause.getLocalizedMessage());
+						if (autoReconnect)
+						{
+							log.warn("CONNECTION_LOST", cause.getLocalizedMessage());
+						}
+						else
+						{
+							// in this case there is no attempt to reconnect, so error out
+							log.error("CONNECTION_LOST", cause.getLocalizedMessage());
+							if (mqttClient == client && getRunningState() == RunningState.STARTED)
+							{
+								setRunningState(RunningState.ERROR);
+							}
+						}
 					}
 				});
 
@@ -190,7 +218,7 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 				options.setSSLProperties(sslProperties);
 			}
 
-			options.setCleanSession(true);
+			options.setCleanSession(cleanSession);
 			options.setAutomaticReconnect(autoReconnect);
 
 			boolean connecting = false;
@@ -351,20 +379,47 @@ public class MqttInboundTransport extends InboundTransportBase implements Runnab
 			}
 		}
 		
-		autoReconnect = false;
-		if (getProperty("autoReconnect").isValid()) {
-			autoReconnect = Boolean.TRUE.equals(getProperty("autoReconnect").getValue());
+		autoReconnect = !getProperty("autoReconnect").isValid() ||
+			Boolean.TRUE.equals(getProperty("autoReconnect").getValue());
+		
+		predefClientId = null; // default
+		Property predefClientIdProp  = getProperty("predefClientId");
+		if (predefClientIdProp != null && predefClientIdProp.isValid())
+		{
+			String value = predefClientIdProp.getValueAsString();
+			if (value != null && !(value = value.trim()).isEmpty())
+			{
+				predefClientId = value;
+			}
 		}
+		
+ 		Property cleanSessionProp = getProperty("cleanSession");
+		cleanSession = (cleanSessionProp == null) || !cleanSessionProp.isValid() ||
+			Boolean.TRUE.equals(cleanSessionProp.getValue());
+		
+ 		Property unsubOnStopProp = getProperty("unsubOnStop");
+		unsubOnStop = !cleanSession && (unsubOnStopProp == null || !unsubOnStopProp.isValid()
+				|| Boolean.TRUE.equals(unsubOnStopProp.getValue()));
+		
+		Property resubOnReconProp = cleanSession ? null : getProperty("resubOnRecon");
+		resubOnRecon = (resubOnReconProp == null || !resubOnReconProp.isValid()
+				|| Boolean.TRUE.equals(resubOnReconProp.getValue()));
 	}
 
 	@Override
 	public synchronized void stop()
 	{
+		setRunningState(RunningState.STOPPING);
 		try
 		{
 			this.thread = null; // primitive cancellation signal
 			if (this.mqttClient != null)
 			{
+				if (!cleanSession && unsubOnStop && topic != null)
+				{
+					this.mqttClient.unsubscribe(topic);
+				}
+				
 				this.mqttClient.disconnect();
 				this.mqttClient.close();
 			}
